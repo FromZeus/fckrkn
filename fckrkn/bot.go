@@ -492,6 +492,10 @@ func welcome(update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
 			"Example:\n" +
 			"/strike 1\n\n" +
 
+			"*WARNING: Untrusted proxies. " +
+			"DON'T use them if you suspect that somebody is spying for you. " +
+			"But anyway nobody CAN'T gain access to your messages.*\n\n" +
+
 			"You can also support the resistance by setting up your own proxy! " +
 			"It's really easy if you know what docker is :) " +
 			"If you're outside Russia, you can set up a proxy for short period(s) " +
