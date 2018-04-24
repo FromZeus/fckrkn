@@ -17,7 +17,7 @@ bin
 .glide/
 
 # VSCode
-.vscode
+#.vscode
 
 # Other
 db/

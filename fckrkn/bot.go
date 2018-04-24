@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,7 @@ var values = map[interface{}]interface{}{}
 var strikesUser = map[interface{}]interface{}{}
 var strikesProxy = map[interface{}]interface{}{}
 var timeoutUser = map[interface{}]interface{}{}
+var subscribeUser = map[interface{}]interface{}{}
 var lock = sync.RWMutex{}
 var amount = uint(0)
 
@@ -124,7 +126,7 @@ func (b bot) put(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI
 		goto ret
 	}
 
-	go UserWatcher(chatId, b.opts)
+	go UserOpTimeoutWatcher(chatId, b.opts)
 
 	_, _, _, _, _, err = ParseProxy(proxyString)
 	if err != nil {
@@ -145,7 +147,7 @@ func (b bot) put(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI
 		Verbose.Printf("Proxy is valid\n\tProxy: %s", proxyString)
 	}
 
-	if amount == b.opts.capacity {
+	if amount >= b.opts.capacity {
 		Verbose.Printf(
 			"Limit is reached, can't add new proxy\n\tProxy: %s\n\tAmount: %d\n\tUser: %s\n\tChatId: %s",
 			proxyString, amount, update.Message.From.UserName, chatId,
@@ -202,14 +204,14 @@ ret:
 	_, err = botApi.Send(msg)
 	if err != nil {
 		Error.Printf(
-			"Can't send reply to user\n\tUser: %s\n\tChatId: %s",
-			update.Message.From.UserName, chatId,
+			"Can't send reply to user\n\tUser: %s\n\tChatId: %s\n\t%s",
+			update.Message.From.UserName, chatId, err,
 		)
 	}
 }
 
-func (b bot) get(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
-	var reply, proxyString, idx, chatId, setupURL string
+func getRandomProxy(db *leveldb.DB, chatId, userName string, botApi *tgbotapi.BotAPI, opts *Options) {
+	var reply, proxyString, idx, setupURL string
 	var success bool = false
 	var iter iterator.Iterator
 	var idxUint uint
@@ -221,17 +223,16 @@ func (b bot) get(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI
 		goto ret
 	}
 
-	chatId = strconv.FormatInt(update.Message.Chat.ID, 10)
 	if readDict(chatId, &timeoutUser) != nil &&
 		readDict(chatId, &timeoutUser).(bool) {
 		reply = fmt.Sprintf(
 			"Please wait a little before calling again :) Timeout is equal to %d seconds.",
-			b.opts.opTimeout,
+			opts.opTimeout,
 		)
 		goto ret
 	}
 
-	go UserWatcher(chatId, b.opts)
+	go UserOpTimeoutWatcher(chatId, opts)
 
 	rand.Seed(time.Now().UTC().UnixNano())
 	idxUint = uint(rand.Intn(int(amount)))
@@ -252,12 +253,12 @@ func (b bot) get(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI
 		proxyString = string(proxyBytes)
 		if err != nil {
 			Error.Printf("Can't get proxy from db\n\tIndex: %s\n\t%s\n\tUser: %s\n\tChatId: %s",
-				idx, err, update.Message.From.UserName, chatId,
+				idx, err, userName, chatId,
 			)
 		} else {
 			Verbose.Printf(
 				"Successfully got proxy from db\n\tIndex: %s\n\tProxy: %s\n\tUser: %s\n\tChatId: %s",
-				idx, proxyString, update.Message.From.UserName, chatId,
+				idx, proxyString, userName, chatId,
 			)
 			success = true
 		}
@@ -268,7 +269,7 @@ func (b bot) get(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI
 		if err != nil {
 			Error.Printf(
 				"%s\n\tProxy: %s\n\tUser: %s\n\tChatId: %s\n\tIndex: %s",
-				err, proxyString, update.Message.From.UserName, chatId, idx,
+				err, proxyString, userName, chatId, idx,
 			)
 			reply = fmt.Sprintf(
 				"Can't parse proxy for some reason but it works :)\n*%s\nIndex: %s*",
@@ -288,11 +289,12 @@ func (b bot) get(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI
 			}
 		}
 	} else {
-		reply = "Something went wrong while getting server from database, try one more time :)"
+		reply = "Something went wrong while getting server from database :\\"
 	}
 
 ret:
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, reply)
+	id, _ := strconv.ParseInt(chatId, 10, 64)
+	msg := tgbotapi.NewMessage(id, reply)
 	msg.ParseMode = "markdown"
 	if success {
 		button := tgbotapi.NewInlineKeyboardButtonURL("Setup this proxy", setupURL)
@@ -303,8 +305,15 @@ ret:
 	}
 	_, err := botApi.Send(msg)
 	if err != nil {
-		Error.Printf("Can't send reply to %s\n\t%s", update.Message.From.UserName, err)
+		Error.Printf("Can't send reply to %s\n\tChatId: %s\n\t%s", userName, chatId, err)
 	}
+}
+
+func (b bot) get(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
+	chatId := strconv.FormatInt(update.Message.Chat.ID, 10)
+	userName := update.Message.From.UserName
+
+	getRandomProxy(db, chatId, userName, botApi, b.opts)
 }
 
 func (b bot) strike(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
@@ -322,7 +331,7 @@ func (b bot) strike(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.Bot
 		goto ret
 	}
 
-	go UserWatcher(chatId, b.opts)
+	go UserOpTimeoutWatcher(chatId, b.opts)
 
 	if readDict(idx, &keys) != nil && readDict(idx, &keys).(bool) {
 		if readDict(uidx, &strikesUser) == nil || !readDict(uidx, &strikesUser).(bool) {
@@ -352,8 +361,104 @@ ret:
 	_, err := botApi.Send(msg)
 	if err != nil {
 		Error.Printf(
-			"Can't send reply to user\n\tUser: %s\n\tChatId: %s",
+			"Can't send reply to user\n\tUser: %s\n\tChatId: %s\n\t%s",
+			update.Message.From.UserName, chatId, err,
+		)
+	}
+}
+
+func (b bot) subscribe(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
+	var reply string
+	var err error
+
+	chatId := strconv.FormatInt(update.Message.Chat.ID, 10)
+	userName := update.Message.Chat.UserName
+	if readDict(chatId, &timeoutUser) != nil &&
+		readDict(chatId, &timeoutUser).(bool) {
+		reply = fmt.Sprintf(
+			"Please wait a little before calling again :) Timeout is equal to %d seconds.",
+			b.opts.opTimeout,
+		)
+		goto ret
+	}
+
+	go UserOpTimeoutWatcher(chatId, b.opts)
+
+	if readDict(chatId, &subscribeUser) != nil {
+		reply = fmt.Sprintf("You are subscribed already ;)")
+		goto ret
+	}
+
+	err = db.Put([]byte("chat:"+chatId), []byte(userName), nil)
+	if err != nil {
+		Error.Printf(
+			"Can't subscribe user\n\tUser: %s\n\tCahtId: %s\n\t%s",
+			userName, chatId, err,
+		)
+		reply = "Something went wrong :\\ Please try again."
+	} else {
+		writeDict(chatId, userName, &subscribeUser)
+		reply = "You've been subscribed successfully!"
+		Info.Printf(
+			"Subscribed successfully\n\tUser: %s\n\tChatId: %s",
+			userName, chatId,
+		)
+	}
+
+ret:
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, reply)
+	msg.ParseMode = "markdown"
+	_, err = botApi.Send(msg)
+	if err != nil {
+		Error.Printf(
+			"Can't send reply to user\n\tUser: %s\n\tChatId: %s\n\t%s",
+			userName, chatId, err,
+		)
+	}
+}
+
+func (b bot) unsubscribe(db *leveldb.DB, update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
+	var reply string
+	var err error
+
+	chatId := strconv.FormatInt(update.Message.Chat.ID, 10)
+	if readDict(chatId, &timeoutUser) != nil &&
+		readDict(chatId, &timeoutUser).(bool) {
+		reply = fmt.Sprintf(
+			"Please wait a little before calling again :) Timeout is equal to %d seconds.",
+			b.opts.opTimeout,
+		)
+		goto ret
+	}
+
+	go UserOpTimeoutWatcher(chatId, b.opts)
+
+	err = db.Delete([]byte("chat:"+chatId), nil)
+	if err != nil {
+		Error.Printf(
+			"Can't delete subscription from db\n\tUser: %s\n\tChatId: %s\n\t%s",
+			update.Message.From.UserName, chatId, err,
+		)
+		reply = "Sorry, can't unsubscribe you fpr some reason :\\"
+	} else if readDict(chatId, &subscribeUser) != nil {
+		delDict(chatId, &subscribeUser)
+		Info.Printf(
+			"Unsubscribed successfully\n\tUser: %s\n\tChatId: %s",
 			update.Message.From.UserName, chatId,
+		)
+		reply = "Unsubscribed successfully!"
+	} else {
+		reply = "You are not subscribed."
+	}
+
+ret:
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, reply)
+	msg.ParseMode = "markdown"
+	_, err = botApi.Send(msg)
+	if err != nil {
+		Error.Printf(
+			"Can't send reply to user\n\tUser: %s\n\tChatId: %s\n\t%s",
+			update.Message.From.UserName, chatId, err,
 		)
 	}
 }
@@ -362,13 +467,17 @@ func welcome(update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
 	reply := fmt.Sprintf(
 		"*Hello and welcome to digital resistance!*\n\n" +
 
-			"This bot handles only working proxies if you can't access some of them there's a chance Roskompozor blocked them. " +
-			"In this situation you probably wanna report such proxies, do it with the /strike command.\n\n" +
+			"This bot handles only working proxies if you can't " +
+			"access some of them there's a chance Roskompozor blocked them. " +
+			"In this situation you probably wanna report such proxies, " +
+			"do it with the /strike command.\n\n" +
 
 			"*Commands you can use:*\n\n" +
 
 			"/get - for gathering a random proxy\n" +
 			"/put - for adding a new one\n" +
+			"/sub - for getting random proxies periodically\n" +
+			"/unsub - to stop getting random proxies periodically\n" +
 			"/strike - for reporting non working proxies\n\n" +
 
 			"Adding new proxies requires a special form:\n" +
@@ -378,12 +487,15 @@ func welcome(update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
 			"or\n" +
 			"someproxy.com:1080\n\n" +
 
-			"To strike a proxy you have to pass index that you've got from the /get command.\n" +
+			"To strike a proxy you have to pass index that you've got " +
+			"from the /get command.\n" +
 			"Example:\n" +
 			"/strike 1\n\n" +
 
-			"You can also support the resistance by setting up your own proxy! It's really easy if you know what docker is :) " +
-			"If you're outside Russia, you can set up a proxy for short period(s) of time on your own PC for example. " +
+			"You can also support the resistance by setting up your own proxy! " +
+			"It's really easy if you know what docker is :) " +
+			"If you're outside Russia, you can set up a proxy for short period(s) " +
+			"of time on your own PC for example. " +
 			"This docker image was made especially for proxying of Telegram.\n" +
 			"https://hub.docker.com/r/schors/tgdante2\n" +
 			"*Beta testing*",
@@ -406,10 +518,23 @@ func StrikesReseter(opts *Options) {
 	}
 }
 
-func UserWatcher(chatId string, opts *Options) {
+func UserOpTimeoutWatcher(chatId string, opts *Options) {
 	writeDict(chatId, true, &timeoutUser)
 	time.Sleep(time.Duration(opts.opTimeout) * time.Second)
 	writeDict(chatId, false, &timeoutUser)
+}
+
+func UserSubscribesWathcer(db *leveldb.DB, botApi *tgbotapi.BotAPI, opts *Options) {
+	for {
+		for k, v := range subscribeUser {
+			getRandomProxy(db, k.(string), v.(string), botApi, opts)
+			Verbose.Printf(
+				"Get proxy by subscription\n\tUser: %s\n\tChatId: %s",
+				v.(string), k.(string),
+			)
+		}
+		time.Sleep(time.Duration(opts.subTimeout) * time.Minute)
+	}
 }
 
 func Watcher(idx, proxyString string, opts *Options, db *leveldb.DB) {
@@ -477,17 +602,6 @@ func (b bot) Start() {
 	}
 	defer db.Close()
 
-	iter := db.NewIterator(nil, nil)
-	defer iter.Release()
-	for iter.Next() {
-		k, v := iter.Key(), iter.Value()
-		keys[string(k)] = true
-		values[string(v)] = true
-		amount++
-		go Watcher(string(k), string(v), b.opts, db)
-		time.Sleep(time.Duration(10) * time.Millisecond)
-	}
-
 	botApi, err := tgbotapi.NewBotAPI(b.token)
 	if err != nil {
 		Error.Println("Can't authenticate with given token")
@@ -495,6 +609,24 @@ func (b bot) Start() {
 	}
 
 	Info.Printf("Authorized on account %s", botApi.Self.UserName)
+
+	iter := db.NewIterator(nil, nil)
+	defer iter.Release()
+	for iter.Next() {
+		k, v := iter.Key(), iter.Value()
+		sk, sv := string(k), string(v)
+		if strings.Contains(sk, "chat:") {
+			id := strings.Replace(sk, "chat:", "", -1)
+			subscribeUser[id] = sv
+		} else {
+			keys[sk] = true
+			values[sv] = true
+			amount++
+			time.Sleep(time.Duration(10) * time.Millisecond)
+			go Watcher(sk, sv, b.opts, db)
+		}
+	}
+	go UserSubscribesWathcer(db, botApi, b.opts)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -512,12 +644,18 @@ func (b bot) Start() {
 		switch update.Message.Command() {
 		case "start":
 			go welcome(update, botApi)
+		case "help":
+			go welcome(update, botApi)
 		case "put":
 			go b.put(db, update, botApi)
 		case "get":
 			go b.get(db, update, botApi)
 		case "strike":
 			go b.strike(db, update, botApi)
+		case "sub":
+			go b.subscribe(db, update, botApi)
+		case "unsub":
+			go b.unsubscribe(db, update, botApi)
 		}
 	}
 }

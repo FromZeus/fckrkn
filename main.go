@@ -24,12 +24,16 @@ var (
 	).Default("10").Uint()
 	strikeTimeout = kingpin.Flag(
 		"strikeTimeout",
-		"Timeout of reseting strikes in minutes",
+		"Timeout of reseting strikes in minutes.",
 	).Default("10").Uint()
 	opTimeout = kingpin.Flag(
 		"opTimeout",
 		"Timeout of operations per user in sec.",
 	).Default("5").Uint()
+	subTimeout = kingpin.Flag(
+		"subTimeout",
+		"Timeout of sending notifications to subscribers in minutes.",
+	).Default("15").Uint()
 	dbpath = kingpin.Flag(
 		"dbpath",
 		"Path to level db.",
@@ -61,6 +65,7 @@ func main() {
 		*strikeCap,
 		*strikeTimeout,
 		*opTimeout,
+		*subTimeout,
 		*dbpath,
 		*host,
 		*port,

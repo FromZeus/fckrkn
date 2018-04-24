@@ -7,6 +7,7 @@ type Options struct {
 	strikeCap     uint
 	strikeTimeout uint
 	opTimeout     uint
+	subTimeout    uint
 	dbpath        string
 	host          string
 	port          uint16
@@ -20,11 +21,15 @@ func NewOptions(
 	strikeCap uint,
 	strikeTimeout uint,
 	opTimeout uint,
+	subTimeout uint,
 	dbpath string,
 	host string,
 	port uint16,
 	verbose bool,
 ) Options {
-	o := Options{capacity, timeout, checkCap, strikeCap, strikeTimeout, opTimeout, dbpath, host, port, verbose}
+	o := Options{
+		capacity, timeout, checkCap, strikeCap, strikeTimeout,
+		opTimeout, subTimeout, dbpath, host, port, verbose,
+	}
 	return o
 }
