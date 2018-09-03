@@ -487,13 +487,13 @@ func welcome(update tgbotapi.Update, botApi *tgbotapi.BotAPI) {
 			"or\n" +
 			"someproxy.com:1080\n\n" +
 
-			"To strike a proxy you have to pass index that you've got " +
+			"To strike a proxy you have to pass an index that you've got " +
 			"from the /get command.\n" +
 			"Example:\n" +
 			"/strike 1\n\n" +
 
-			"*WARNING: Untrusted proxies. " +
-			"DON'T use them if you suspect that somebody is spying for you. " +
+			"*CAUTION: Untrusted proxies. " +
+			"DON'T use them if you suspect that somebody is spying on you. " +
 			"But anyway nobody CAN'T gain access to your messages.*\n\n" +
 
 			"You can also support the resistance by setting up your own proxy! " +
