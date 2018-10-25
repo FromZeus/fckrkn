@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/fckrkn/fckrkn"
+	"github.com/FromZeus/fckrkn/fckrkn"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
